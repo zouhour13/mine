@@ -6,7 +6,7 @@
  * No secrets are ever sent from the frontend.
  */
 
-import type { ApiError, Concept, ConceptList, Repo } from "./types";
+import type { ApiError, ConceptList, Repo } from "./types";
 
 const BASE_URL =
   process.env.NEXT_PUBLIC_API_URL?.replace(/\/$/, "") ?? "http://localhost:8000";

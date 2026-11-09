@@ -91,7 +91,7 @@ async def create_or_get_repo(
     Logic:
         - completed  → return existing, is_new=False (skip re-analysis)
         - pending/analyzing → return existing, is_new=False (already running)
-        - failed     → create new record, is_new=True (allow retry)
+        - failed     → reset existing record to pending, is_new=True (retry)
         - not found  → create new record, is_new=True
     """
     # Validate URL first — raises InvalidGitHubURLError if malformed
@@ -102,7 +102,25 @@ async def create_or_get_repo(
         status = existing.get("status")
         if status in ("pending", "analyzing", "completed"):
             return RepoRead(**existing), False
-        # status == "failed" → fall through and create a new record
+        # status == "failed" → reset the existing record for re-analysis
+
+        repo_id = existing["id"]
+        try:
+            await _update_repo(
+                db,
+                repo_id,
+                status="pending",
+                error_message=None,
+                analyzed_at=None,
+            )
+        except Exception as exc:
+            raise DatabaseError() from exc
+
+        # Re-fetch to get the updated row
+        updated = await _get_repo_by_id(db, repo_id)
+        if updated is None:
+            raise DatabaseError()
+        return RepoRead(**updated), True
 
     owner, name = parse_github_url(github_url)
 

@@ -22,18 +22,17 @@ export function useConcepts(
   const [concepts, setConcepts] = useState<Concept[]>([]);
   const [total, setTotal] = useState(0);
   const [error, setError] = useState<string | null>(null);
-  const [isLoading, setIsLoading] = useState(false);
+  // isLoading starts true when we know we're about to fetch; only set to false.
+  const [isLoading, setIsLoading] = useState(() => !!(repoId && ready));
 
   useEffect(() => {
     if (!repoId || !ready) return;
-
-    setIsLoading(true);
-    setError(null);
 
     getConcepts(repoId)
       .then((data) => {
         setConcepts(data.concepts);
         setTotal(data.total);
+        setError(null);
       })
       .catch((err: unknown) => {
         const message =

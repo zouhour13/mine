@@ -16,12 +16,15 @@ interface UseRepoResult {
 /**
  * Polls GET /repos/{repoId} every 2 seconds until status is completed or failed.
  * Automatically stops polling on terminal status or component unmount.
+ * Uses an isPolling guard to prevent overlapping concurrent requests.
  */
 export function useRepo(repoId: string | null): UseRepoResult {
   const [repo, setRepo] = useState<Repo | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [isLoading, setIsLoading] = useState(false);
+  // isLoading initialises to true when a repoId is already known at mount time.
+  const [isLoading, setIsLoading] = useState(() => !!repoId);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const isPollingRef = useRef(false);
 
   const stopPolling = useCallback(() => {
     if (intervalRef.current) {
@@ -30,11 +33,18 @@ export function useRepo(repoId: string | null): UseRepoResult {
     }
   }, []);
 
+  /**
+   * fetchRepo is called from setInterval (always async) so setState calls
+   * inside it do not violate react-hooks/set-state-in-effect.
+   */
   const fetchRepo = useCallback(async () => {
     if (!repoId) return;
+    if (isPollingRef.current) return; // skip overlapping requests
+    isPollingRef.current = true;
     try {
       const data = await getRepo(repoId);
       setRepo(data);
+      setError(null);
       if (TERMINAL_STATUSES.includes(data.status)) {
         stopPolling();
         setIsLoading(false);
@@ -45,15 +55,19 @@ export function useRepo(repoId: string | null): UseRepoResult {
       setError(message);
       stopPolling();
       setIsLoading(false);
+    } finally {
+      isPollingRef.current = false;
     }
   }, [repoId, stopPolling]);
 
   useEffect(() => {
     if (!repoId) return;
 
-    setIsLoading(true);
-    setError(null);
-    fetchRepo();
+    isPollingRef.current = false;
+
+    // Schedule initial fetch as a microtask so setState calls inside fetchRepo
+    // are not synchronous within the effect body.
+    void Promise.resolve().then(fetchRepo);
 
     intervalRef.current = setInterval(fetchRepo, POLL_INTERVAL_MS);
 

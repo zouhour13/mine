@@ -19,11 +19,16 @@ from app.routes import concepts, repos
 async def lifespan(app: FastAPI):
     # Startup — nothing to initialise yet; DB client is lazily created.
     yield
-    # Shutdown — close the HTTP client used by GitHubClient
-    from app.core.dependencies import _build_github_client
+    # Shutdown — close cached HTTP clients (GitHub and LLM).
+    from app.core.dependencies import _build_github_client, _build_llm_client
     try:
-        client = _build_github_client()
-        await client.aclose()
+        github_client = _build_github_client()
+        await github_client.aclose()
+    except Exception:
+        pass
+    try:
+        llm_client = _build_llm_client()
+        await llm_client.aclose()
     except Exception:
         pass
 

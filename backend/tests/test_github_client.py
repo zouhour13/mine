@@ -71,6 +71,18 @@ class TestFetchRepoMetadata:
             await client.fetch_repo_metadata("owner", "private-repo")
 
     @respx.mock
+    async def test_403_rate_limit_header_raises_rate_limit(self, client):
+        respx.get("https://api.github.com/repos/owner/repo").mock(
+            return_value=Response(
+                403,
+                headers={"X-RateLimit-Remaining": "0"},
+                json={"message": "API rate limit exceeded"},
+            )
+        )
+        with pytest.raises(RateLimitError):
+            await client.fetch_repo_metadata("owner", "repo")
+
+    @respx.mock
     async def test_429_raises_rate_limit(self, client):
         respx.get("https://api.github.com/repos/owner/repo").mock(
             return_value=Response(429, json={"message": "rate limit exceeded"})

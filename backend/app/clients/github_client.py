@@ -164,7 +164,13 @@ class GitHubClient:
 
         if response.status_code == 404:
             raise RepoNotFoundError()
-        if response.status_code in (401, 403):
+        if response.status_code == 401:
+            raise PrivateRepoError()
+        if response.status_code == 403:
+            # GitHub returns 403 for both rate-limit exhaustion and private repos.
+            # Distinguish by inspecting the rate-limit remaining header.
+            if response.headers.get("X-RateLimit-Remaining") == "0":
+                raise RateLimitError()
             raise PrivateRepoError()
         if response.status_code == 429:
             raise RateLimitError()

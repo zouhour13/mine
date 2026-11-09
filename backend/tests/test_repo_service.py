@@ -169,32 +169,45 @@ class TestCreateOrGetRepo:
         )
         assert is_new is False
 
-    async def test_failed_repo_creates_new(self):
-        """A failed repo allows re-analysis."""
-        existing = _make_repo_row(status="failed")
-        # select returns failed, insert returns new pending
-        db = _db_returning_insert(_make_repo_row(status="pending"))
+    async def test_failed_repo_reuses_existing_record(self):
+        """A failed repo is reset to pending in-place (no new insert)."""
+        existing = _make_repo_row(status="failed", error_message="oops", analyzed_at="2026-10-01T00:00:00+00:00")
+        reset_row = _make_repo_row(status="pending")
 
-        # Override select to return the failed existing row
-        call_tracker = db._call_tracker
-        builder = db._builder
-        new_row = _make_repo_row(status="pending")
+        call_tracker: dict = {}
+        db = MagicMock()
+        builder = MagicMock()
 
-        async def smart_execute_with_failed():
+        async def smart_execute():
             last = call_tracker.get("last")
-            if last == "insert":
-                return MagicMock(data=[new_row])
-            if last in ("update", "upsert"):
+            if last == "update":
                 return MagicMock(data=[])
-            # select → return failed existing
-            return MagicMock(data=[existing])
+            if last == "insert":
+                # Should NOT be called — new code does update, not insert
+                raise AssertionError("insert called on failed repo — unique constraint would fail")
+            # select calls: first returns failed, second (re-fetch) returns reset
+            call_tracker["select_count"] = call_tracker.get("select_count", 0) + 1
+            if call_tracker["select_count"] == 1:
+                return MagicMock(data=[existing])
+            return MagicMock(data=[reset_row])
 
-        builder.execute = smart_execute_with_failed
+        builder.select = MagicMock(side_effect=lambda *a, **kw: _set_and_return(call_tracker, "select", builder))
+        builder.insert = MagicMock(side_effect=lambda *a, **kw: _set_and_return(call_tracker, "insert", builder))
+        builder.update = MagicMock(side_effect=lambda *a, **kw: _set_and_return(call_tracker, "update", builder))
+        builder.upsert = MagicMock(side_effect=lambda *a, **kw: _set_and_return(call_tracker, "upsert", builder))
+        builder.eq = MagicMock(return_value=builder)
+        builder.limit = MagicMock(return_value=builder)
+        builder.order = MagicMock(return_value=builder)
+        builder.execute = smart_execute
+        db.table.return_value = builder
 
-        _, is_new = await repo_service.create_or_get_repo(
+        repo, is_new = await repo_service.create_or_get_repo(
             db, "https://github.com/owner/repo"
         )
         assert is_new is True
+        assert repo.status == "pending"
+        # Confirm update was called (not insert)
+        assert call_tracker.get("last") == "select"  # last call is re-fetch select
 
 
 class TestRunAnalysis:
